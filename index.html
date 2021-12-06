@@ -3,21 +3,253 @@
 	<head>
 		<meta charset="utf-8">
 		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-
-		<title>reveal.js</title>
-
 		<link rel="stylesheet" href="dist/reset.css">
 		<link rel="stylesheet" href="dist/reveal.css">
-		<link rel="stylesheet" href="dist/theme/black.css">
+		<link rel="stylesheet" href="dist/theme/white.css">
 
 		<!-- Theme used for syntax highlighted code -->
 		<link rel="stylesheet" href="plugin/highlight/monokai.css">
+		<title>Gradual Program Analysis for Null Pointers</title>
 	</head>
 	<body>
 		<div class="reveal">
 			<div class="slides">
-				<section>Slide 1</section>
-				<section>Slide 2</section>
+				<section>
+					<h2>Gradual Program Analysis for Null Pointers</h2>
+					<ul>
+						<li><strong>Sam Estep</strong>
+						Carnegie Mellon University, Pittsburgh, PA, USA</li>
+						<li><strong>Wise</strong>
+						Carnegie Mellon University, Pittsburgh, PA, USA</li> 
+						<li><strong>Jonathan Aldrich</strong>
+							Carnegie Mellon University, Pittsburgh, PA, USA</li>
+						<li><strong>Éric Tanter</strong>
+							Computer Science Department (DCC), University of Chile, Santiago, Chile</li>
+						<li><strong>Johannes Bader</strong>
+							Jane Street, New York, NY, USA</li>	
+						<li><strong>Joshua Sunshine</strong>
+							Carnegie Mellon University, Pittsburgh, PA, USA</li>
+						</ul>
+
+				</section>
+
+				<section>
+					<h2>Nullness Check</h2>
+					<ul>
+						<li>标记: @Nonnull, @Nullable</li>
+						<li>位置：方法的参数和返回值</li>
+						<li>现有工具: Facebook’s Infer Eradicate,  Uber’s
+							NullAway, NullSafe, Java Nullness Checker
+						</li>
+						<li>当标记缺失，现有的工具会补上一个默认的标记：
+							<ul>
+								<li>Infer Eradicate, Java Nullness Checker: @Nonnull</li>
+								<li>NullAway: 汇(sink)=@Nullable，源(sources)=@Nonnull</li>
+							</ul>
+						</li>
+						<li>这会导致False Positive，同时是unsound的</li>
+					</ul>
+					<aside class="notes">
+						1. Nonnull表示不应该取null值，nullable表示可以为null。一般打在。。。
+						2. 假如标记是完整的，静态空指针检查工具会很有用。但是实践中往往存在可能忘打、漏打标记，尤其是依赖的第三方库它没有打标记。
+						3. 此时静态检查工具会在缺失标记的地方打上默认的标记，如。。。
+						4. 但这种处理方法会引入很多False Positive，同时也不能保证为sound。
+					</aside>
+				</section>
+				<section>
+					<h2>Example of False Positive</h2>
+					<pre><code data-trim data-line-numbers>
+						class Main {
+							static      String reverse (String      str) {
+								if (str == null) return new String();
+								StringBuilder builder = new StringBuilder(str);
+								builder.reverse();
+								return builder.toString();
+							}
+							public static void main (String [] args) {
+								String reversed = reverse(null);
+							 	String frown = reverse(":)");
+							 	String both = reversed.concat(frown);
+							 	System.out.println(both);
+							}
+						}
+					</code></pre>
+					<ul>
+						<li>Infer Eradicate, Java Nullness Checker: @NonNull</li>
+						<li>行9出现警告，是FP</li>
+					</ul>
+					<aside class="notes">
+						在这个例子中，reserve是缺失标记的方法。我们可以看到这个方法一开始就判断参数是否是null，是null就返回一个新的对象，不是null就对它进行一些操作，再把它返回回去。
+						返回值永远不是null
+						但是我们的静态检查工具会添加默认的标记@Nonnull，这导致传递null作为参数时会报错，但这不是这个方法的本意。
+					</aside>
+				</section>
+				<section>
+					<h2>Example of False Negative</h2>
+					<pre><code>
+						class Main {
+							static      String reverse (String      str) {
+								if (str == null) return null;
+								StringBuilder builder = new StringBuilder(str);
+								builder.reverse();
+								return builder.toString();
+							}
+							public static void main (String [] args) {
+								String reversed = reverse(null);
+							 	String frown = reverse(":)");
+							 	String both = reversed.concat(frown);
+							 	System.out.println(both);
+							}
+						}
+					</code></pre>
+					<ul>
+						<li>行3出现警告，是FP</li>
+						<li>行11没有警告，是FN（reserved是null）</li>
+					</ul>
+					<aside class="notes">
+						我们把第三行换成return null。这时参数还是nullable，但是返回值变成nullable。
+						这时，第11行应该要报错，因为reserved可能是null，这里对空指针解引用。但是静态分析工具把方法标记为nonnull，所以识别不出来。
+						因此是unsound的。
+					</aside>
+				</section>
+				<section>
+					<h2>Gradual Null Pointer Analysis</h2>
+					<ul>
+						<li class="fragment">不添加默认标记</li>
+						<li class="fragment">乐观处理：当标记缺失而无法检查，那就不检查</li>
+						<li class="fragment"> 这样必然是unsound的，因此添加动态检查</li>
+						<li class="fragment">乐观的静态检查减少FP + 动态检查保证soundness</li>
+					</ul>
+					<div class="r-stack">
+						<pre class="fragment fade-in-then-out"><code> 
+							class Main {
+								static      String reverse (String      str) {
+									if (str == null) return new String();
+									StringBuilder builder = new StringBuilder(str);
+									builder.reverse();
+									return builder.toString();
+								}
+								public static void main (String [] args) {
+									String reversed = reverse(null);
+									String frown = reverse(":)");
+									String both = reversed.concat(frown);
+									System.out.println(both);
+								}
+							}
+						</code></pre>
+						<pre class="fragment"><code>
+							class Main {
+								static      String reverse (String      str) {
+									if (str == null) return null;
+									StringBuilder builder = new StringBuilder(str);
+									builder.reverse();
+									return builder.toString();
+								}
+								public static void main (String [] args) {
+									String reversed = reverse(null);
+									String frown = reverse(":)");
+									String both = reversed.concat(frown);
+									System.out.println(both);
+								}
+							}
+						</code></pre>
+					</div>
+					<asdie class="notes">
+						这篇论文提出了一个渐进的空指针检查
+						它认为现有的处理方法引用太多的FP。
+						为了减少这些FP，应该要对标记缺失进行乐观的处理。就是当标记缺失，我们不补上，也不去检查。
+						如第一个例子：传递null作为参数，GNPA不会报错，它乐观地认为这个参数传递是有效的。
+						第二个例子：对空指针解引用，GNPA也不报错，它乐观地认为reserved不是null，可以调用方法。
+						但是显然这第二个例子是错误的，GNPA因此在动态运行中添加检查，在动态检查中会发现第13行的错误。
+						把静态检查和动态检查综合来看，就能既减少FP，又能保证sound。
+
+						jvm自己就会检查空指针解引用（本身在第13行就会报错），要你这个动态检查有什么用？
+						1. 它的这个工具/方法不只针对java，也可用于c++等。在c++里面就没有空指针检查。
+						2. 动态检查不只是针对解引用，还有对标记的检查
+						3. 后面的结果显示：这个工具能够避免jvm一半以上的空指针检查。
+
+						疑问：这个动态检查在遇到空指针解引用也是报错，简而言之程序依然会crash。这也能叫sound？那jvm是不是也是sound的？
+					</asdie>
+				</section>
+				<section>
+					<h2>PICL: A Procedural Imperative Core Language</h2>
+					<ul>
+						<li>一种对编程语言的抽象</li>
+						
+					</ul>
+					<img src="assets/PICL.png">
+					<aside class="notes">
+						把不同编程语言与空指针相关的部分抽取出来。GPNA因此不是针对特定语言的分析工具。
+						解释一下重要的部分：
+						标记有三种：nullable，nonnull，缺失（？）
+						方法是带有标记的方法
+						表达式只有：null，变量，对象的域，创建对象，方法调用，还有逻辑与、逻辑或，用来产生复杂的条件表达式
+						判断条件只有：判断变量是不是null，结合上面的与或可以判断复杂条件
+						语句只保留赋值、store、条件和循环、返回
+					</aside>
+				</section>
+				<section>
+					<h2>Control Flow Graph</h2>
+					<img src="assets/CFG0.png">
+					<img src="assets/CFG1.png">
+					<aside class="notes">
+						上面说的是抽象编程语言的语法，这里说的控制流图里面的指令。
+						这里我看到，它的方法调用和方法入口处都带上标记。
+						然后分支变成了branch、if、else三条指令。branch是真正用来对x做判断的，只判断是不是null。
+						if表示x != null的分支，else表示== null的分支。这条指令用来帮助静态分析工具进行推断的。
+						然后有对变量进行的与或操作的指令，根据y和z是不是null来决定x是不是null，用来实现复杂条件判断。
+					</aside>
+				</section>
+				<section>
+					<h2>Dynamic Semantics</h2>
+					<ul>
+						<li>对程序（PICL）动态行为的建模</li>
+						<li>主要用于后面形式化的证明</li>
+						
+					</ul>
+					<div class="r-stack">
+						<img src="assets/Dynamic Program State.png">
+						<img src="assets/Dynamic Heap.png">
+						<img src="assets/Dynamic Stack.png">
+
+					</div>
+					<aside>
+						程序状态=堆+栈
+						堆是由地址到对象的映射，对象就是一堆成员变量及其取值
+						栈由一个个帧组成，每个帧就是变量及其取值，再加上当前执行的代码。除了栈顶的帧，其他帧应该都停在了方法调用的那条代码上。
+
+						程序运行的规则: 根据当前程序状态决定下一个程序状态。比方说当前是赋值指令，下一个程序状态就是让x映射到新的值上面。
+						当前是if语句，那程序状态不变，if语句不干事。
+
+						实际上一般的语句都能根据规则畅行无阻，就三种会可能卡住：方法调用，方法返回，解引用。
+					</aside>
+				</section>
+				<section>
+					<h2>A Static Null-Pointer Analysis for PICL</h2>
+					<ul>
+						<li>我们先形式化静态分析的过程</li>
+						<li>且假设所有标记都打上了，我们将证明在这种情况下静态分析是sound的</li>
+					</ul>
+				</section>
+				<section>
+					<h2>Semilattice of Abstract Values</h2>
+					<ul>
+						<li>静态检查的方法是数据流分析</li>
+						<li>数据流是三种状态：Nullable，Null，Nonnull</li>
+						<li>具体化函数（concretization function）：三种状态所代表的具体取值范围
+							<ul>
+								<li>conc(Nullable) = Val, conc(Null) = {0}, conc(NonNull) = Val \ {0}</li>
+							</ul></li>
+					</ul>
+					<img src="assets/semilattice.png">
+				</section>
+				<section>
+					<h2>Transfer Function</h2>
+					<img src="assets/transfer function.png">
+					<aside class="notes">
+						
+					</aside>
+				</section>
 			</div>
 		</div>
 
