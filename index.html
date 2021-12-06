@@ -154,7 +154,7 @@
 							}
 						</code></pre>
 					</div>
-					<asdie class="notes">
+					<aside class="notes">
 						这篇论文提出了一个渐进的空指针检查
 						它认为现有的处理方法引用太多的FP。
 						为了减少这些FP，应该要对标记缺失进行乐观的处理。就是当标记缺失，我们不补上，也不去检查。
@@ -169,7 +169,7 @@
 						3. 后面的结果显示：这个工具能够避免jvm一半以上的空指针检查。
 
 						疑问：这个动态检查在遇到空指针解引用也是报错，简而言之程序依然会crash。这也能叫sound？那jvm是不是也是sound的？
-					</asdie>
+					</aside>
 				</section>
 				<section>
 					<h2>PICL: A Procedural Imperative Core Language</h2>
@@ -213,12 +213,13 @@
 						<img src="assets/Dynamic Stack.png">
 
 					</div>
-					<aside>
+					<aside class="notes">
 						程序状态=堆+栈
 						堆是由地址到对象的映射，对象就是一堆成员变量及其取值
 						栈由一个个帧组成，每个帧就是变量及其取值，再加上当前执行的代码。除了栈顶的帧，其他帧应该都停在了方法调用的那条代码上。
 
-						程序运行的规则: 根据当前程序状态决定下一个程序状态。比方说当前是赋值指令，下一个程序状态就是让x映射到新的值上面。
+						程序运行的规则: 根据当前程序状态决定下一个程序状态。
+						比方说当前是赋值指令，下一个程序状态就是让x映射到新的值上面。
 						当前是if语句，那程序状态不变，if语句不干事。
 
 						实际上一般的语句都能根据规则畅行无阻，就三种会可能卡住：方法调用，方法返回，解引用。
@@ -228,26 +229,84 @@
 					<h2>A Static Null-Pointer Analysis for PICL</h2>
 					<ul>
 						<li>我们先形式化静态分析的过程</li>
-						<li>且假设所有标记都打上了，我们将证明在这种情况下静态分析是sound的</li>
+						<li>且假设所有标记都打上了，也就是没有“?”的情况</li>
+						<li>我们将证明在这种情况下静态分析是sound的</li>
 					</ul>
 				</section>
 				<section>
 					<h2>Semilattice of Abstract Values</h2>
 					<ul>
 						<li>静态检查的方法是数据流分析</li>
-						<li>数据流是三种状态：Nullable，Null，Nonnull</li>
+						<li>数据流是每个变量有三种状态：Nullable，Null，Nonnull</li>
 						<li>具体化函数（concretization function）：三种状态所代表的具体取值范围
 							<ul>
 								<li>conc(Nullable) = Val, conc(Null) = {0}, conc(NonNull) = Val \ {0}</li>
 							</ul></li>
 					</ul>
 					<img src="assets/semilattice.png">
+					<aside class="notes">
+						根据这个半格，当x是nonnull和x是null两个数据流值汇聚的时候，meet的结果是x是nullable。
+					</aside>
 				</section>
 				<section>
 					<h2>Transfer Function</h2>
-					<img src="assets/transfer function.png">
+					<img src="assets/transfer function.png" class="stretch">
 					<aside class="notes">
-						
+						挑重点的讲：
+						1. if x：这是当x != null的分支，因此x的状态是null
+						2. x := m@a(y@b)，在调用函数后，x的状态就是是标记
+						3. proc m@a(y@b)，在函数入口处，参数的状态就是标记
+						4. null，new
+						5. x := y.f，取对象的成员，因为f没有标记，我们无法判断f的状态，所以x只能保守推断为nullable。
+							至于y = nonnull？我估计是因为防止出现冗余的报错。假如y是null，那么只会在这条指令报错，因为后面y变成nonnull了。
+						6. x.f := y同理
+					</aside>
+				</section>
+				<section>
+					<h2>Fixpoint Algorithm</h2>
+					<img src="assets/Fix point algorithm.png">
+
+				</section>
+				<section>
+					<h2>Static Warnings</h2>
+					<ul>
+						<li>安全函数：用来检查数据流值是否满足需要的状态，不然就报错</li>
+						<img src="assets/safe.png">
+						<li>σ(x) ⊑ safe(x)</li>
+					</ul>
+					<aside class="notes">
+						在这里进行检查和报错。
+						实际上就只是要求调用方法时需要满足标记，以及解引用时不能是空指针
+						若数据流值中的状态小于safe函数，比如数据流里面。。。
+					</aside>
+				</section>
+				<section>
+					<h2> Soundness of NPA</h2>
+					<img src="assets/NPA soundness.png">
+					<aside class="notes">
+						这篇论文证明了两个命题：
+						1. 假如运行的某个程序状态都满足数据流值中的状态（nullable，nonnull，null），那么程序会继续执行。
+						2. 程序继续执行后的程序状态依然满足数据流值中的状态。
+						因此程序不会中断，NPA是sound的
+					</aside>
+				</section>
+				<section>
+					<h2>Gradual Null-Pointer Analysis</h2>
+					<ul>
+						<li>考虑缺失标记的情况，对NPA进行提升</li>
+						<li>数据流值</li>
+						<img src="assets/ABST~.png">
+						<li>半格</li>
+						<img src="assets/lattice~.png">
+						<li>序：定义“⊑”，不是偏序</li>
+						<img src="assets/order！.png">
+					</ul>
+					<aside class="notes">
+						数据流值除了引入？一种状态，还添加了null？、nonnull？
+						？的含义是，x可能为null，nonnull，nullable
+						null？的含义是x可能为nullale或者null
+						nonnull？的含义是x可能为nullable或者nonnull
+
 					</aside>
 				</section>
 			</div>
