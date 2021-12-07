@@ -270,14 +270,14 @@
 				<section>
 					<h2>Static Warnings</h2>
 					<ul>
-						<li>安全函数：用来检查数据流值是否满足需要的状态，不然就报错</li>
+						<li>安全函数(safe function)：用来检查数据流值是否满足需要的状态，不然就报错</li>
 						<img src="assets/safe.png">
 						<li>σ(x) ⊑ safe(x)</li>
 					</ul>
 					<aside class="notes">
 						在这里进行检查和报错。
-						实际上就只是要求调用方法时需要满足标记，以及解引用时不能是空指针
-						若数据流值中的状态小于safe函数，比如数据流里面。。。
+						实际上就只是要求调用方法时参数需要满足标记，返回的时候需要满足返回值的标记，以及解引用时指针不能为null。
+						若数据流值中的状态小于safe函数才视为合法的正确的，比如数据流里面是null，safe的结果是nullable，那么就正确。
 					</aside>
 				</section>
 				<section>
@@ -295,18 +295,40 @@
 					<ul>
 						<li>考虑缺失标记的情况，对NPA进行提升</li>
 						<li>数据流值</li>
-						<img src="assets/ABST~.png">
 						<li>半格</li>
-						<img src="assets/lattice~.png">
-						<li>序：定义“⊑”，不是偏序</li>
-						<img src="assets/order！.png">
+						<li>序：定义“⊑”；不是偏序；主要用于safe函数（也就是检查）</li>
+
+						
+						<div class="r-stack stretch">
+							<img src="assets/ABST~.png" class="fragment fade-in-then-out">
+							<img src="assets/lattice~.png" class="fragment fade-in-then-out">
+							<img src="assets/order！.png" class="fragment">
+						</div>
 					</ul>
 					<aside class="notes">
-						数据流值除了引入？一种状态，还添加了null？、nonnull？
-						？的含义是，x可能为null，nonnull，nullable
-						null？的含义是x可能为nullale或者null
-						nonnull？的含义是x可能为nullable或者nonnull
+						数据流值除了引入？一种状态，还添加了null？、nonnull？<br>
+						？的含义是，x可能为null，nonnull，nullable<br>
+						null？的含义是x可能为nullale或者null<br>
+						nonnull？的含义是x可能为nullable或者nonnull<br>
 
+						半格在数据流分析用。这个序在检查报错的时候用。<br>
+						值得注意的是，这不是偏序，也不满足反对称。？小于任何值，任何值也小于？。
+					</aside>
+				</section>
+				<section>
+					<h2>Gradual Null-Pointer Analysis</h2>
+					<ul>
+						<li class="fragment">传递函数</li>
+						<li class="fragment">safe function</li>
+					</ul>
+					<img src="assets/flow function~.png" class="stretch">
+					<img src="assets/safe function~.png"> 
+					<aside class="notes">
+						传递函数和安全函数<br>
+						这里写得很复杂，但是实际含义和前面的静态分析是一样的。就是标记是什么，变量的状态就是什么。只不过现在的标记多了“？”。<br>
+						比如说对于方法调用，这个传递函数的效果就是把z的的状态设为a，a可能是“？”<br>
+						对于安全函数也一样，假如调用函数的时候参数的标记是？，那么对y的要求就是？
+						
 					</aside>
 				</section>
 			</div>

@@ -12,10 +12,7 @@ section.has-dark-background, section.has-dark-background h1, section.has-dark-ba
  * GLOBAL STYLES
  *********************************************/
 
-/*自定义：main-font-size*/
-.notes{
-  white-space: pre-wrap;
-}
+
 :root {
   --r-background-color: #fff;
   --r-main-font: Source Sans Pro, Helvetica, sans-serif;
