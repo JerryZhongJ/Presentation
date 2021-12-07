@@ -1,2 +1,2 @@
 /dist/theme/white.css --r-main-font-size: 42px; -> --r-main-font-size: 36px;
-/plugin/notes/notes.js a={namespace:"reveal-notes",type:"state",notes:"",markdown:!1,whitespace:"pre-line",state:t.getState()}; -> 
+/plugin/notes/notes.js a={namespace:"reveal-notes",type:"state",notes:"",markdown:!1,whitespace:"pre-line",state:t.getState()}; -> a={namespace:"normal",type:"state",notes:"",markdown:!1,whitespace:"pre-line",state:t.getState()};
