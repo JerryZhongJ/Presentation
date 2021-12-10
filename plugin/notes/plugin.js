@@ -94,7 +94,7 @@ const Plugin = () => {
 				type: 'state',
 				notes: '',
 				markdown: false,
-				whitespace: 'pre-wrap',
+				whitespace: 'normal',
 				state: deck.getState()
 			};
 
