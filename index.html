@@ -61,7 +61,7 @@
 				</section>
 				<section>
 					<h2>Example of False Positive</h2>
-					<pre><code data-trim data-line-numbers>
+					<pre><code data-trim data-line-numbers="3|6|9">
 						class Main {
 							static      String reverse (String      str) {
 								if (str == null) return new String();
@@ -89,7 +89,7 @@
 				</section>
 				<section>
 					<h2>Example of False Negative</h2>
-					<pre><code>
+					<pre><code data-trim data-line-numbers="3|9|11">
 						class Main {
 							static      String reverse (String      str) {
 								if (str == null) return null;
@@ -124,7 +124,7 @@
 						<li class="fragment">乐观的静态检查减少FP + 动态检查保证soundness</li>
 					</ul>
 					<div class="r-stack">
-						<pre class="fragment fade-in-then-out" data-fragment-index=3><code> 
+						<pre class="fragment fade-in-then-out" data-fragment-index=3><code data-trim data-line-numbers> 
 							class Main {
 								static      String reverse (String      str) {
 									if (str == null) return new String();
@@ -140,7 +140,7 @@
 								}
 							}
 						</code></pre>
-						<pre class="fragment" data-fragment-index=4><code>
+						<pre class="fragment" data-fragment-index=4><code data-trim data-line-numbers>
 							class Main {
 								static      String reverse (String      str) {
 									if (str == null) return null;
@@ -230,11 +230,11 @@
 					</aside>
 				</section>
 				<section>
-					<h2>A Static Null-Pointer Analysis for PICL</h2>
+					<h2>NPA: A Static Null-Pointer Analysis for PICL</h2>
 					<ul>
 						<li class="fragment">我们先介绍纯静态分析的过程</li>
 						<li class="fragment">假设所有标注都打上了，也就是没有“?”的情况</li>
-						<li class="fragment">我们将证明在这种情况下静态分析是sound的</li>
+						<li class="fragment">证明在这种情况下静态分析是sound的</li>
 					</ul>
 				</section>
 				<section>
@@ -298,13 +298,13 @@
 					</aside>
 				</section>
 				<section>
-					<h2>Gradual Null-Pointer Analysis</h2>
+					<h2>GNPA: Gradual Null-Pointer Analysis</h2>
 					<ul>
 						<li class="fragment" data-fragment-index=1>考虑缺失标注的情况，对原来NPA进行升级</li>
 						<li class="fragment" data-fragment-index=2>数据流值
 							<ul>
 								<li class="fragment" data-fragment-index=3>新状态代表为旧状态的一个集合</li>
-								<li class="fragment" data-fragment-index=4>NonNull, Null, NonNull的集合只包含它们自己</li>
+								<li class="fragment" data-fragment-index=4>NonNull, Null, Nullable的集合只包含它们自己</li>
 								<li class="fragment" data-fragment-index=5>带问号的新状态的集合则代表由多个个旧状态组成</li>
 							</ul>
 						</li>
@@ -413,18 +413,21 @@
 				<section>
 					<h2>Dynamic Checking</h2>
 					<img src="assets/dynamic check.png">
-					<img src="assets/dynamic check example.PNG" class="r-stretch">
+					<img src="assets/dynamic check example.jpg" class="r-stretch">
 					<aside class="notes">
 						之前说了，他们的分析会进行动态检查来保证soundness。然而动态检查是有选择性的。
 						我们前面看到，只要变量的状态里面有个一个元素小于等于safe里面的元素就算过，这是非常宽松的。
 
-						动态检查的位置是：当变量的新状态里面的元素存在大于safe的上界，就检查。
+						动态检查的位置是：当变量的新状态里面的元素存在不小于等于safe的上界，就检查。
+
+						所以，没有加标注的方法入口和返回的时候，不会进行动态检查。
+						需要动态检查的是那些加了标注的方法和解引用
 					</aside>
 				</section>
 				<section>
 					<h2> Gradual Properties</h2>
 					<ul>
-						<li class="fragment" data-fragment-index=1>渐进分析是和静态分析兼容。当标注全部打上，渐进分析的效果和上面说的静态分析应该一样
+						<li class="fragment" data-fragment-index=1>渐进分析是和静态分析兼容(conservative extension)。当标注全部打上，渐进分析的效果和上面说的静态分析应该一样
 							<ul>
 								<li class="fragment" data-fragment-index=1>conservative static extension</li>
 								<li class="fragment" data-fragment-index=1>conservative dynamic extension</li>
@@ -445,11 +448,11 @@
 					<aside class="notes">
 						接着他形式化证明了他的渐进分析的一些性质。
 						
-						值得注意的是，这里的动态模型中添加了error状态，就是动态检查后报错的状态。
+						值得注意的是，这里的运行时模型中添加了error状态，就是动态检查后报错的状态。
 						他把error状态看作是定义内的行为，所以动态报错就不算做程序异常或者crash.
 						所以把动态检查算在内，程序是sound的。可是我有个疑惑，这样任何jvm上跑的程序都是sound的了？
 
-						接着他证明，这个概念来自于另外一篇论文。
+						这个概念来自于另外一篇论文。
 			
 						因此这两条保证了。
 					</aside>
@@ -469,6 +472,9 @@
 						<img src="assets/static grudual guarantee.png">
 						<img src="assets/dynamic grudual guarantee.png">
 					</div>
+					<aside class="notes">
+						p2比p1缺了一些标注。
+					</aside>
 				</section>
 				<section>
 					<h2>Prototype</h2>
@@ -491,16 +497,18 @@
 				<section>
 					<h2>Result</h2>
 					<ul>
-						<li class="fragment">静态警告
+						<li class="fragment" data-fragment-index=0>静态警告
 							<ul>
-								<li class="fragment"> Eradicate: 1489, NullSafe: 654, Graduator: 228, NullAway: 0</li>
-								<li class="fragment">怎么还有FP？：不是由标注缺失引起的；由于对域的处理不是流敏感的</li>
+								<li class="fragment" data-fragment-index=1> Eradicate: 1489, NullSafe: 654, Graduator: 228, NullAway: 0</li>
+								<li class="fragment">怎么还有FP？
+									<ul>
+										<li class="fragment">不是由标注缺失引起的，其他的不精确</li>
+										<li class="fragment">由于对域的处理不是流敏感的</li>
+									<ul></li>
 							</ul></li>
 					</ul>
+					<img src="assets/static check result.png" class="fragment" data-fragment-index=1>
 					<aside class="notes">
-
-						第一栏是jvm自己添加的解引用时的检查。第二栏说用了我的渐进分析后，这些检查都不需要了。
-						平均清除67%
 					</aside>
 				</section>
 				<section>
@@ -513,13 +521,18 @@
 							</ul>
 						</li>
 					</ul>
-					<img src="assets/dynamic check result.png" class="fragment r-stretch">
+					<img src="assets/dynamic check result.png" class="fragment">
+					<aside class="notes">
+						
+						第一栏是jvm自己添加的解引用时的检查。第二栏说用了我的渐进分析后，这些检查都不需要了。
+						平均清除67%
+					</aside>
 				</section>
 				<section>
 					<h2>Conclusion</h2>
 					<ul>
 						<li  class="fragment">构造了一个框架，能把基于标注的静态分析变成渐进的</li>
-						<li class="fragment">这个渐进分析是静态分析的consrvative extension，且满足gradul guarantee</li>
+						<li class="fragment">这个渐进分析是静态分析的conservative extension，且满足gradual guarantee</li>
 						<li class="fragment">安全的静态分析能够避免冗余的动态检查；不安全的静态分析能够减少FP；GPNA能同时减少FP，且避免冗余的动态检查</li>
 					</ul>
 				</section>
