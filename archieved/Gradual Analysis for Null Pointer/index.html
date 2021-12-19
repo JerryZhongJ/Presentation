@@ -1,0 +1,557 @@
+<!doctype html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+		<link rel="stylesheet" href="dist/reset.css">
+		<link rel="stylesheet" href="dist/reveal.css">
+		<link rel="stylesheet" href="dist/theme/white.css">
+
+		<!-- Theme used for syntax highlighted code -->
+		<link rel="stylesheet" href="plugin/highlight/monokai.css">
+		<title>Gradual Program Analysis for Null Pointers</title>
+	</head>
+	<body>
+		<div class="reveal">
+			<div class="slides">
+				<section>
+					<h1>Gradual Program Analysis for Null Pointers</h1>
+
+						<p><strong>Sam Estep</strong>
+						Carnegie Mellon University, Pittsburgh, PA, USA</p>
+						<p><strong>Wise</strong>
+						Carnegie Mellon University, Pittsburgh, PA, USA</p> 
+						<p><strong>Jonathan Aldrich</strong>
+							Carnegie Mellon University, Pittsburgh, PA, USA</p>
+						<p><strong>Éric Tanter</strong>
+							Computer Science Department (DCC), University of Chile, Santiago, Chile</p>
+						<p><strong>Johannes Bader</strong>
+							Jane Street, New York, NY, USA</p>	
+						<p><strong>Joshua Sunshine</strong>
+							Carnegie Mellon University, Pittsburgh, PA, USA</p>
+
+				</section>
+
+				<section>
+					<h2>Nullness Check</h2>
+					<ul>
+						<li class="fragment">标注: @Nonnull, @Nullable</li>
+						<li class="fragment">位置：方法的参数和返回值</li>
+						<li class="fragment">现有工具: Facebook’s Infer Eradicate,  Uber’s
+							NullAway, NullSafe, Java Nullness Checker
+						</li>
+						<li class="fragment">当标注缺失，现有的工具会补上一个默认的标注：
+							<ul>
+								<li class="fragment">Infer Eradicate, Java Nullness Checker: @Nonnull</li>
+								<li class="fragment">NullAway: 汇(sink)=@Nullable，源(sources)=@Nonnull</li>
+							</ul>
+						</li>
+						<li class="fragment">这会导致False Positive，同时是unsound的</li>
+					</ul>
+					<aside class="notes">
+						这篇论文要解决的问题的背景是空指针检查。
+						目前空指针检查是通过添加标注来辅助
+						Nonnull表示不应该取null值，nullable表示可以为null。一般打在。。。
+						然后静态分析工具就根据参数、方法调用的返回值与其他变量的关系，进而判断变量在解引用时是否可能是空指针的，然后发出警告。
+						或者，在方法入口和方法返回前加入assertion
+						假如标注是完整的，静态空指针检查工具会很有用。但是实践中往往存在可能忘打、漏打标注，尤其是依赖的第三方库它没有打标注。
+						此时静态检查工具会在缺失标注的地方打上默认的标注，如。。。
+						但这种处理方法会引入很多False Positive，同时也不能保证为sound。
+					</aside>
+				</section>
+				<section>
+					<h2>Example of False Positive</h2>
+					<pre><code data-trim data-line-numbers="3|6|9">
+						class Main {
+							static      String reverse (String      str) {
+								if (str == null) return new String();
+								StringBuilder builder = new StringBuilder(str);
+								builder.reverse();
+								return builder.toString();
+							}
+							public static void main (String [] args) {
+								String reversed = reverse(null);
+							 	String frown = reverse(":)");
+							 	String both = reversed.concat(frown);
+							 	System.out.println(both);
+							}
+						}
+					</code></pre>
+					<ul>
+						<li class="fragment">Infer Eradicate, Java Nullness Checker: @NonNull</li>
+						<li class="fragment">行9出现警告，是FP</li>
+					</ul>
+					<aside class="notes">
+						在这个例子中，reserve是缺失标注的方法。我们可以看到这个方法一开始就判断参数是否是null，是null就返回一个新的对象，不是null就对它进行一些操作，再把它返回回去。
+						返回值永远不是null
+						但是我们的静态检查工具会添加默认的标注@Nonnull，这导致传递null作为参数时会报错，但这不是这个方法的本意。
+					</aside>
+				</section>
+				<section>
+					<h2>Example of False Negative</h2>
+					<pre><code data-trim data-line-numbers="3|9|11">
+						class Main {
+							static      String reverse (String      str) {
+								if (str == null) return null;
+								StringBuilder builder = new StringBuilder(str);
+								builder.reverse();
+								return builder.toString();
+							}
+							public static void main (String [] args) {
+								String reversed = reverse(null);
+							 	String frown = reverse(":)");
+							 	String both = reversed.concat(frown);
+							 	System.out.println(both);
+							}
+						}
+					</code></pre>
+					<ul>
+						<li class="fragment" data-fragment-index=>行3出现警告，是FP</li>
+						<li class="fragment">行11没有警告，是FN（reserved是null）</li>
+					</ul>
+					<aside class="notes">
+						我们把第三行换成return null。这时参数还是nullable，但是返回值变成nullable。
+						这时，第11行应该要报错，因为reserved可能是null，这里对空指针解引用。但是静态分析工具把方法标注为nonnull，所以识别不出来。
+						因此是unsound的。
+					</aside>
+				</section>
+				<section>
+					<h2>Gradual Null Pointer Analysis</h2>
+					<ul>
+						<li class="fragment" data-fragment-index=1>不添加默认标注</li>
+						<li class="fragment" data-fragment-index=2>乐观处理：当标注缺失而无法检查，那就不检查</li>
+						<li class="fragment"> 这样必然是unsound的，因此添加动态检查</li>
+						<li class="fragment">乐观的静态检查减少FP + 动态检查保证soundness</li>
+					</ul>
+					<div class="r-stack">
+						<pre class="fragment fade-in-then-out" data-fragment-index=3><code data-trim data-line-numbers> 
+							class Main {
+								static      String reverse (String      str) {
+									if (str == null) return new String();
+									StringBuilder builder = new StringBuilder(str);
+									builder.reverse();
+									return builder.toString();
+								}
+								public static void main (String [] args) {
+									String reversed = reverse(null);
+									String frown = reverse(":)");
+									String both = reversed.concat(frown);
+									System.out.println(both);
+								}
+							}
+						</code></pre>
+						<pre class="fragment" data-fragment-index=4><code data-trim data-line-numbers>
+							class Main {
+								static      String reverse (String      str) {
+									if (str == null) return null;
+									StringBuilder builder = new StringBuilder(str);
+									builder.reverse();
+									return builder.toString();
+								}
+								public static void main (String [] args) {
+									String reversed = reverse(null);
+									String frown = reverse(":)");
+									String both = reversed.concat(frown);
+									System.out.println(both);
+								}
+							}
+						</code></pre>
+					</div>
+					<aside class="notes">
+						这篇论文提出了一个渐进的空指针检查
+						它认为现有的处理方法引用太多的FP。
+						为了减少这些FP，应该要对标注缺失进行乐观的处理。就是当标注缺失，我们不补上，也不去检查。
+
+						如第一个例子：传递null作为参数，GNPA不会报错，它乐观地认为这个参数传递是有效的。
+
+						第二个例子：对空指针解引用，GNPA也不报错，它乐观地认为reserved不是null，可以调用方法。
+						但是显然这第二个例子是错误的，GNPA因此在动态运行中添加检查，在动态检查中会发现第13行的错误。
+						把静态检查和动态检查综合来看，就能既减少FP，又能保证sound。
+
+						jvm自己就会检查空指针解引用（本身在第13行就会报错），要你这个动态检查有什么用？
+						1. 它的这个工具/方法不只针对java，也可用于c++等。在c++里面就没有空指针检查。
+						2. 动态检查不只是针对解引用，还有对标注的检查
+						3. 后面的结果显示：这个工具能够避免jvm一半以上的空指针检查。
+
+						疑问：这个动态检查在遇到空指针解引用也是报错，简而言之程序依然会crash。这也能叫sound？那jvm是不是也是sound的？
+					</aside>
+				</section>
+				<section>
+					<h2>PICL: A Procedural Imperative Core Language</h2>
+					<ul>
+						<li>一种对编程语言的抽象</li>
+						
+					</ul>
+					<img src="assets/PICL.png">
+					<aside class="notes">
+						把不同编程语言与空指针相关的部分抽取出来。GPNA因此不是针对特定语言的分析工具。
+						解释一下重要的部分：
+						标注有三种：nullable，nonnull，缺失（？）
+						方法是带有标注的方法
+						表达式只有：null，变量，对象的域，创建对象，方法调用，还有条件表达式
+						判断条件只有：判断变量是不是null
+						
+					</aside>
+				</section>
+				<section>
+					<h2>Control Flow Graph</h2>
+					<img src="assets/CFG0.png">
+					<img src="assets/CFG1.png">
+					<aside class="notes">
+						上面说的是编程语言的语法，这里说的控制流图里面的指令。
+						这里我看到，它的方法调用和方法入口处都带上标注。
+						然后分支变成了branch、if、else三条指令。branch是真正用来对x做判断的，只判断是不是null。
+						if表示x != null的分支，else表示== null的分支。这条指令用来帮助静态分析工具进行推断的。
+						然后对变量进行的与或操作，根据y和z是不是null来决定x是不是null，用来实现复杂条件判断。
+					</aside>
+				</section>
+				<section>
+					<h2>Dynamic Semantics</h2>
+					<ul>
+						<li>对程序（PICL）动态行为的建模</li>
+						<li>主要用于后面形式化的证明</li>
+						
+					</ul>
+					<div class="r-stack">
+						<img src="assets/Dynamic Program State.png" class="fragment">
+						<img src="assets/Dynamic Heap.png" class="fragment">
+						<img src="assets/Dynamic Stack.png" class="fragment">
+						<img src="assets/rules.png" class="fragment">
+					</div>
+					<aside class="notes">
+						程序状态=堆+栈
+						堆是由地址到对象的映射，对象就是一堆成员变量及其取值
+						栈由一个个帧组成，每个帧就是变量及其取值，再加上当前执行的代码。除了栈顶的帧，其他帧应该都停在了方法调用的那条代码上。
+
+						程序运行的规则: 根据当前程序状态决定下一个程序状态。
+						比方说当前是赋值指令，下一个程序状态就是让x映射到新的值上面。
+
+						实际上一般的语句都能根据规则畅行无阻，就三种会可能卡住：方法调用，方法返回，解引用。
+					</aside>
+				</section>
+				<section>
+					<h2>NPA: A Static Null-Pointer Analysis for PICL</h2>
+					<ul>
+						<li class="fragment">我们先介绍纯静态分析的过程</li>
+						<li class="fragment">假设所有标注都打上了，也就是没有“?”的情况</li>
+						<li class="fragment">证明在这种情况下静态分析是sound的</li>
+					</ul>
+				</section>
+				<section>
+					<h2>Semilattice of Abstract Values</h2>
+					<ul>
+						<li class="fragment">静态分析的方法是数据流分析</li>
+						<li class="fragment">数据流值是每个变量有三种状态：Nullable，Null，Nonnull</li>
+					</ul>
+					<img src="assets/semilattice.png" class="fragment">
+					<aside class="notes">
+						
+					</aside>
+				</section>
+				<section>
+					<h2>Transfer Function</h2>
+					<img src="assets/transfer function.png" class="stretch">
+					<aside class="notes">
+						挑重点的讲：
+						1. if x：这是当x != null的分支，因此x的状态是null
+						2. x := m@a(y@b)，在调用函数后，x的状态就是是标注
+						3. proc m@a(y@b)，在函数入口处，参数的状态就是标注
+						4. null，new
+						5. x := y.f，取对象的成员，因为f没有标注，我们无法判断f的状态，所以x只能保守推断为nullable。
+							至于y = nonnull？我估计是因为防止出现冗余的报错。假如y是null，那么只会在这条指令报错，后面再次解引用时就不会报错。
+						6. x.f := y同理
+					</aside>
+				</section>
+				<section>
+					<h2>Fixpoint Algorithm</h2>
+					<img src="assets/Fix point algorithm.png">
+
+				</section>
+				<section>
+					<h2>Static Warnings</h2>
+					<ul>
+						<li class="fragment">安全函数(safe function)：用来检查数据流值是否满足指令要求的状态，不然就报错</li>
+						<img src="assets/safe.png" class="fragment">
+						<li class="fragment">σ(x) ⊑ safe(x)</li>
+					</ul>
+					<aside class="notes">
+						在这里进行检查和报错。
+						实际上就只是要求调用方法时参数的状态需要满足标注，返回的时候需要满足返回值的标注，以及解引用时指针不能为null。
+						若数据流值中的状态小于等于safe函数才视为合法的正确的，比如数据流里面是null，safe的结果是nullable，那么就正确。
+					</aside>
+				</section>
+				<section>
+					<h2> Soundness of NPA</h2>
+					<ul>
+						<li class="fragment" data-fragment-index=1>假如一个程序所有代码都满足σ(x) ⊑ safe(x)，我们说这个程序是有效的</li>
+						<li class="fragment" data-fragment-index=2>对于有效的程序，假如它的运行时状态满足不动点算法产生的数据流值，我们说这个运行时状态是有效的</li>
+						<li class="fragment" data-fragment-index=3>对于一个有效的程序和有效的运行时状态，它必有后继的状态。即能继续运行。</li>
+						<li class="fragment" data-fragment-index=4>对于一个有效的程序和有效的运行时状态，它后继的状态也是有效的</li>
+					</ul>
+					<div class="r-stack">
+						<img src="assets/valid.png" class="fragment fade-in-then-out"  data-fragment-index=2>
+						<img src="assets/NPA soundness.png" class="fragment"  data-fragment-index=3>
+					</div>
+
+					<aside class="notes">
+						因此程序不会卡住，所以是sound的。
+					</aside>
+				</section>
+				<section>
+					<h2>GNPA: Gradual Null-Pointer Analysis</h2>
+					<ul>
+						<li class="fragment" data-fragment-index=1>考虑缺失标注的情况，对原来NPA进行升级</li>
+						<li class="fragment" data-fragment-index=2>数据流值
+							<ul>
+								<li class="fragment" data-fragment-index=3>新状态代表为旧状态的一个集合</li>
+								<li class="fragment" data-fragment-index=4>NonNull, Null, Nullable的集合只包含它们自己</li>
+								<li class="fragment" data-fragment-index=5>带问号的新状态的集合则代表由多个个旧状态组成</li>
+							</ul>
+						</li>
+						<div class="r-stack r-stretch">
+							<img src="assets/ABST~.png" class="fragment fade-in-then-out" data-fragment-index=2>
+							<span class="fragment" data-fragment-index=3><img src="assets/ABST~2ABST.png" class="fragment fade-out" data-fragment-index=6></span>
+							<img src="assets/ABST~ diagram.PNG" height=400 class="fragment" data-fragment-index=6>
+						</div>
+					</ul>
+					<aside class="notes">
+						数据流值除了引入？一种状态，还添加了null？、nonnull？.加波浪号表示新的状态，没加
+
+						接下来我用旧状态表示前面NPA出现的那三个状态，新状态表示现在出现的6个状态。
+
+						比如, NonNull?代表{NonNull, Nullable}，？表示Nullable，Null, NotNull构成的集合。
+
+						个人理解, ?在这里表示模糊性.表示静态分析器没有给出精确的推断，而是把结论限制在这几个旧状态内。
+						比如说它无法判断变量是否只能取非零值。但是,它又不愿意做保守的假设，比如说直接选Nullable作为变量的状态，说一个变量是Nullable肯定不会有错，但是如上所说会引入FP，且丧失精度.
+						比如说你把NonNull？改成Nullable, 那么你就抹掉了x肯定能取非零值这个性质。
+
+						因此用？来表示这种模糊。
+						
+					</aside>
+				</section>
+				<section>
+					<h2>Shifted Join & Semilattice</h2>
+					<ul>
+						<li class="fragment" data-fragment-index=1><img src="assets/alpha.png"></li>
+						<li class="fragment" data-fragment-index=2>alpha的结果：6个新状态中，覆盖â且最小</li>
+						<li class="fragment" data-fragment-index=4>新状态的join：枚举元素、两两join、alpha</li>
+						<li class="fragment" data-fragment-index=6>新状态的半格结构</li>
+					</ul>
+					<div class="r-stack r-stretch">
+						<img src="assets/join~.png" class="fragment fade-in-then-out" data-fragment-index=1>
+						<img src="assets/alpha example.PNG" height=400 class="fragment fade-in-then-out" data-fragment-index=2>
+						<img src="assets/join~.png" class="fragment fade-in-then-out" data-fragment-index=4>
+						<img src="assets/join~ example.PNG" class="fragment fade-in-then-out" data-fragment-index=5>
+						<img src="assets/lattice~.png" class="fragment" data-fragment-index=6>	
+					</div>
+					<aside class="notes">
+						接着,我们接着对半格进行升级.
+						这里alpha函数是对一个旧状态的集合对应一个新状态，和前面反过来。它在6个新状态谁的集合里面看哪个能够覆盖a-hat且最小。
+
+						然后两个新状态的join运算就是，找到新状态的集合，对里面的元素两两join,join的结果汇总在一起得到旧状态的集合，再对这个集合使用alpha得到新状态。
+
+						我们还是直接看最终半格结构是什么样子
+
+					</aside>
+				</section>
+				<section>
+					<h2>Shifted Order</h2>
+					序：定义“⊑”；不是偏序；主要用于safe函数（也就是静态检查）
+					<div class="r-stack r-stretch">
+						<img src="assets/order~ definition.png" class="fragment fade-in-then-out">
+						<img src="assets/order~ example.PNG" class="fragment fade-in-then-out">
+						<img src="assets/order！.png" class="fragment">
+					</div>
+					<aside class="notes">
+						然后重新定义状态之间的序，也就是小于等于关系。
+						A和B比较，假如A集合里面有一个元素，小于等于B里面的一个元素，就算作小于等于。
+						后面静态检查的时候就用这个小于等于来检查。左边是变量的新状态，右边是需要满足的要求（它能取的最大值）。
+
+						值得注意的是，这不是偏序，也不满足反对称。？小于等于任何值，任何值也小于等于？。
+						半格和这个序是无关的，是分开的。
+						半格在数据流分析用。这个序在检查报错的时候用
+					</aside>
+				</section>
+				<section>
+					<h2>Shifted Transfer Function & Safe Function</h2>
+					<ul>
+						<li class="fragment" data-fragment-index=1>传递函数：枚举元素、组合、原传递函数、alpha</li>
+						<li class="fragment" data-fragment-index=3>safe function</li>
+						<li class="fragment" data-fragment-index=4>不动点算法不变</li>
+						<li class="fragment" data-fragment-index=5>设计思路?</li>
+						<li class="fragment" data-fragment-index=6>静态报错</li>
+					</ul>
+					<div class="r-stack r-stretch">
+						<img src="assets/flow function~.png" class="fragment fade-in-then-out" data-fragment-index=1>
+						<img src="assets/transfer example.PNG" height=400 class="fragment fade-in-then-out" data-fragment-index=2>
+						<img src="assets/safe function~.png" class="fragment fade-in-then-out" data-fragment-index=3> 
+						<img src="assets/reference.png" class="fragment fade-in-then-out" data-fragment-index=5>
+						<img src="assets/warning～.png" class="fragment fade-in-then-out" data-fragment-index=6>
+					</div>
+					<aside class="notes">
+						传递函数和安全函数
+
+						这里的意思是说考虑数据流值，新的标注，他们各自有个集合，考虑他们元素之间的各种组合。
+						每个组合——旧状态的组合，相当于一个具体的情况，可以用之前NPA的传递函数来求。
+						最后把结果汇总起来，通过alpha得到一个新状态。
+						整个过程，就是新的传递函数。
+						我的理解就是？代表模糊性，就是存在各种可能性，所以他就把每种可能都枚举了一遍，把枚举的结果集合在一起
+
+						这里写得很复杂，从最终效果来看，就是标注是什么，变量的状态就是什么。只不过现在的标注多了“？”。
+						比如说对于方法调用，这个传递函数的效果就是把z的的状态设为a，a可能是“？”
+
+						安全函数的构造也一样，假如调用函数的时候参数的标注是？，那么对y的要求就是？
+						
+						至于为什么这么设计，比如半格为什么这么定义的？传递函数为什么这么写？论文说他们是跟着另外一篇论文设计的。
+						而那篇论文我还没看。但是似乎里面介绍了一个方法论，说如何通过纯的静态类型系统构造出一个渐进的类型系统。
+
+						静态报错和之前一样。就是判断数据流值和safe之间的大小。
+						值得注意的是，所有值都小于等于？，所以当标注为原来的NonNull, Nullable时，和原来一样，为？时，总是不会报错。
+						当变量的状态为？时，也总是不报错。
+					</aside>
+				</section>
+				<section>
+					<h2>Dynamic Checking</h2>
+					<img src="assets/dynamic check.png">
+					<img src="assets/dynamic check example.jpg" class="r-stretch">
+					<aside class="notes">
+						之前说了，他们的分析会进行动态检查来保证soundness。然而动态检查是有选择性的。
+						我们前面看到，只要变量的状态里面有个一个元素小于等于safe里面的元素就算过，这是非常宽松的。
+
+						动态检查的位置是：当变量的新状态里面的元素存在不小于等于safe的上界，就检查。
+
+						所以，没有加标注的方法入口和返回的时候，不会进行动态检查。
+						需要动态检查的是那些加了标注的方法和解引用
+					</aside>
+				</section>
+				<section>
+					<h2> Gradual Properties</h2>
+					<ul>
+						<li class="fragment" data-fragment-index=1>渐进分析是和静态分析兼容(conservative extension)。当标注全部打上，渐进分析的效果和上面说的静态分析应该一样
+							<ul>
+								<li class="fragment" data-fragment-index=1>conservative static extension</li>
+								<li class="fragment" data-fragment-index=1>conservative dynamic extension</li>
+							</ul>
+						</li>
+						<li class="fragment" data-fragment-index=2>渐进分析是sound的
+							<ul>
+								<li class="fragment" data-fragment-index=2>gradual progress</li>
+								<li class="fragment" data-fragment-index=2>gradual preservation</li>
+							</ul>
+						</li>
+					</ul>
+					<div class="r-stack r-stretch">
+						<img src="assets/conservative extension.png" class="fragment fade-in-then-out" data-fragment-index=1>
+						<img src="assets/gradual soundness.png" class="fragment" data-fragment-index=2>
+						
+					</div>
+					<aside class="notes">
+						接着他形式化证明了他的渐进分析的一些性质。
+						
+						值得注意的是，这里的运行时模型中添加了error状态，就是动态检查后报错的状态。
+						他把error状态看作是定义内的行为，所以动态报错就不算做程序异常或者crash.
+						所以把动态检查算在内，程序是sound的。可是我有个疑惑，这样任何jvm上跑的程序都是sound的了？
+
+						这个概念来自于另外一篇论文。
+			
+						因此这两条保证了。
+					</aside>
+				</section>
+				<section>
+					<h2> Gradual Properties</h2>
+					<ul>
+						<li>渐进保证（gradual guarantee）
+							<ul>
+								<li>static gradual guarantee：有效的程序缺失标注不会引入静态警告，不会破坏有效性</li>
+								<li >dynamic gradual guarantee：缺失标注不会改变程序可观测到的行为，不会破坏可归约性</li>
+								<li >丢失精度是无害的</li>
+							</ul>
+						</li>
+					</ul>
+					<div >
+						<img src="assets/static grudual guarantee.png">
+						<img src="assets/dynamic grudual guarantee.png">
+					</div>
+					<aside class="notes">
+						p2比p1缺了一些标注。
+					</aside>
+				</section>
+				<section>
+					<h2>Prototype</h2>
+					<ul>
+						<li class="fragment" data-fragment-index=1>Graduator</li>
+						<li class="fragment" data-fragment-index=2>基于Facebook's Infer框架，能够同时分析C、C++、Obj-C、Java</li>
+						<li class="fragment" data-fragment-index=3>简化半格</li>
+						<li class="fragment" data-fragment-index=4>域标注</li>
+					</ul>
+					<img src="assets/Simplified Semilattice.png" class="fragment" data-fragment-index=3>
+					<aside class="notes">
+						我们需要对上面说的理论进行简化。
+						因为空指针检查这个问题有个特殊性在于我们并不关心一个变量只会取null，在我们眼中null和nullable是一样的。所以取消了null.
+						所以一开始静态分析的半格只保留两个元素，后面升级后的半格只加入了？。
+						另外他们的实现还支持给域添加标注。我们之前说因为域没有标注所以丢失了一点精度。
+
+						总的来说，虽然前面的形式化很复杂，但实际落地还是很简单的。
+					</aside>
+				</section>
+				<section>
+					<h2>Result</h2>
+					<ul>
+						<li class="fragment" data-fragment-index=0>静态警告
+							<ul>
+								<li class="fragment" data-fragment-index=1> Eradicate: 1489, NullSafe: 654, Graduator: 228, NullAway: 0</li>
+								<li class="fragment">怎么还有FP？
+									<ul>
+										<li class="fragment">不是由标注缺失引起的，其他的不精确</li>
+										<li class="fragment">由于对域的处理不是流敏感的</li>
+									<ul></li>
+							</ul></li>
+					</ul>
+					<img src="assets/static check result.png" class="fragment" data-fragment-index=1>
+					<aside class="notes">
+					</aside>
+				</section>
+				<section>
+					<h2>Result</h2>
+					<ul>
+						<li class="fragment">动态检查
+							<ul>
+								<li class="fragment">用无标注的代码</li>
+								<li class="fragment">清除67%的解引用检查</li>
+							</ul>
+						</li>
+					</ul>
+					<img src="assets/dynamic check result.png" class="fragment">
+					<aside class="notes">
+						
+						第一栏是jvm自己添加的解引用时的检查。第二栏说用了我的渐进分析后，这些检查都不需要了。
+						平均清除67%
+					</aside>
+				</section>
+				<section>
+					<h2>Conclusion</h2>
+					<ul>
+						<li  class="fragment">构造了一个框架，能把基于标注的静态分析变成渐进的</li>
+						<li class="fragment">这个渐进分析是静态分析的conservative extension，且满足gradual guarantee</li>
+						<li class="fragment">安全的静态分析能够避免冗余的动态检查；不安全的静态分析能够减少FP；GPNA能同时减少FP，且避免冗余的动态检查</li>
+					</ul>
+				</section>
+			</div>
+		</div>
+
+		<script src="dist/reveal.js"></script>
+		<script src="plugin/notes/notes.js"></script>
+		<script src="plugin/markdown/markdown.js"></script>
+		<script src="plugin/highlight/highlight.js"></script>
+		<script>
+			// More info about initialization & config:
+			// - https://revealjs.com/initialization/
+			// - https://revealjs.com/config/
+			Reveal.initialize({
+				hash: true,
+				// Learn about plugins: https://revealjs.com/plugins/
+				plugins: [ RevealMarkdown, RevealHighlight, RevealNotes ]
+			});
+		</script>
+	</body>
+</html>
